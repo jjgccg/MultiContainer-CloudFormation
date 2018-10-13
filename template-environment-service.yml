@@ -1,0 +1,390 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Customizable service and task definitions be used after 
+             primary cloud infrastructure is created. Allows up to five container 
+             definitions in the service, and more can be added using the same 
+             design 
+
+Parameters:
+  pEnvironment:
+    Description: An environment name that will be added to resource tags
+    Type: String
+  pCustomer:
+    Description: The name of the customer.
+    Type: String
+  pApplicationName:
+    Description: The application name for this environment
+    Type: String
+  pDesiredCount:
+    Description: The number of simultaneous tasks that you want to run on the cluster
+    Type: Number
+    Default: 1
+  pECSServiceContainerName:
+    Type: CommaDelimitedList
+    Description: Name of the service load balancer container
+  pECSServiceContainerPort:
+    Type: CommaDelimitedList
+    Description: Port on the service load balancer container
+    Default: 443
+  pServiceName:
+    Type: String
+    Description: Name of the stack service
+  pContainerDefNum:
+    Type: Number
+    Description: Number of container definitions in stack
+    Default: 1
+    MinValue: 1
+    MaxValue: 5
+    ConstraintDescription: Must have 1-5 container definitions
+  pContainerDefNames:
+    Type: CommaDelimitedList
+    Description: Name(s) of container definition(s)
+  pContainerDefVersions:
+    Type: CommaDelimitedList
+    Description: Version(s) of the container(s)
+  pContainerDefMemory:
+    Type: CommaDelimitedList
+    Description: Memory specification(s) of the container(s)
+  pContainerDefLinks:                       # "null" indicates AWS::NoValue
+    Type: CommaDelimitedList
+    Description: Link(s) of the container(s)
+  pContainerDefContainerPorts:              # -1 indicates AWS::NoValue
+    Type: CommaDelimitedList
+    Description: Container port mapping(s)
+  pContainerDefHostPorts:                   # -1 indicates AWS::NoValue
+    Type: CommaDelimitedList
+    Description: Host port mapping(s)
+  pContainerDefProtocol:                    # "null" indidicates AWS::NoValue
+    Type: CommaDelimitedList
+    Description: Port mapping protocol(s)
+  pECSCluster:
+    Type: String
+  pECSServiceRole:
+    Type: String
+  pALBTargetGroup:
+    Type: String
+
+Conditions:
+  # container existence conditionals
+  TwoContainerDefs: !Not [!Equals [1, !Ref pContainerDefNum]]
+  ThreeContainerDefs: !And
+              - !Not [!Equals [1, !Ref pContainerDefNum]]
+              - !Not [!Equals [2, !Ref pContainerDefNum]]
+  FourContainerDefs: !And
+              - !Not [!Equals [1, !Ref pContainerDefNum]]
+              - !Not [!Equals [2, !Ref pContainerDefNum]]
+              - !Not [!Equals [3, !Ref pContainerDefNum]]
+  FiveContainerDefs: !Equals [5, !Ref pContainerDefNum]
+
+  # container link conditionals
+  NoFirstContainerDefLink: !Equals [!Select [0, !Ref pContainerDefLinks], "null"]
+  NoSecondContainerDefLink: !Equals [!Select [1, !Ref pContainerDefLinks], "null"]
+  NoThirdContainerDefLink: !Equals [!Select [2, !Ref pContainerDefLinks], "null"]
+  NoFourthContainerDefLink: !Equals [!Select [3, !Ref pContainerDefLinks], "null"]
+  NoFifthContainerDefLink: !Equals [!Select [4, !Ref pContainerDefLinks], "null"]
+
+  # container port conditionals
+  NoFirstContainerPort: !Equals [!Select [0, !Ref pContainerDefContainerPorts], -1]
+  NoSecondContainerPort: !Equals [!Select [1, !Ref pContainerDefContainerPorts], -1]
+  NoThirdContainerPort: !Equals [!Select [2, !Ref pContainerDefContainerPorts], -1]
+  NoFourthContainerPort: !Equals [!Select [3, !Ref pContainerDefContainerPorts], -1]
+  NoFifthContainerPort: !Equals [!Select [4, !Ref pContainerDefContainerPorts], -1]
+
+  # container host port conditionals
+  NoFirstContainerHostPort: !Equals [!Select [0, !Ref pContainerDefHostPorts], -1]
+  NoSecondContainerHostPort: !Equals [!Select [1, !Ref pContainerDefHostPorts], -1]
+  NoThirdContainerHostPort: !Equals [!Select [2, !Ref pContainerDefHostPorts], -1]
+  NoFourthContainerHostPort: !Equals [!Select [3, !Ref pContainerDefHostPorts], -1]
+  NoFifthContainerHostPort: !Equals [!Select [4, !Ref pContainerDefHostPorts], -1]
+
+  #container protocol conditionals
+  NoFirstContainerProtocol: !Equals [!Select [0, !Ref pContainerDefProtocol], "null"]
+  NoSecondContainerProtocol: !Equals [!Select [1, !Ref pContainerDefProtocol], "null"]
+  NoThirdContainerProtocol: !Equals [!Select [2, !Ref pContainerDefProtocol], "null"]
+  NoFourthContainerProtocol: !Equals [!Select [3, !Ref pContainerDefProtocol], "null"]
+  NoFifthContainerProtocol: !Equals [!Select [4, !Ref pContainerDefProtocol], "null"]
+
+Resources:
+  rECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref pECSCluster
+      DesiredCount: !Ref pDesiredCount
+      TaskDefinition: !Ref rECSTaskDefinition
+
+  rECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${pApplicationName}-taskdefinition-${pEnvironment}-${pServiceName}'
+      ContainerDefinitions:
+        - Name: !Select [0, !Ref pContainerDefNames]
+          Essential: true
+          Image: !Join
+                - ''
+                - - !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/testapp-'
+                  - !Join
+                    - ':'
+                    - - !Select [0, !Ref pContainerDefNames]
+                      - !Select [0, !Ref pContainerDefVersions]
+          Memory: !Select [0, !Ref pContainerDefMemory]
+          Links:
+            !If
+              - NoFirstContainerDefLink
+              - !Ref AWS::NoValue
+              - !Select [0, !Ref pContainerDefLinks]
+          PortMappings:
+            - ContainerPort:
+                !If
+                  - NoFirstContainerPort
+                  - !Ref AWS::NoValue
+                  - !Select [0, !Ref pContainerDefContainerPorts]
+              HostPort:
+                !If
+                  - NoFirstContainerHostPort
+                  - !Ref AWS::NoValue
+                  - !Select [0, !Ref pContainerDefHostPorts]
+              Protocol:
+                !If
+                  - NoFirstContainerProtocol
+                  - !Ref AWS::NoValue
+                  - !Select [0, !Ref pContainerDefProtocol]
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Join
+                            - '-'
+                            - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                              - !Select [0, !Ref pContainerDefNames]
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub awslogs-${AWS::StackName}
+        - !If
+          - TwoContainerDefs
+          -
+            Name: !Select [1, !Ref pContainerDefNames]
+            Essential: true
+            Image: !Join
+                  - ''
+                  - - !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/testapp-'
+                    - !Join
+                      - ':'
+                      - - !Select [1, !Ref pContainerDefNames]
+                        - !Select [1, !Ref pContainerDefVersions]
+            Memory: !Select [1, !Ref pContainerDefMemory]
+            Links:
+              !If
+                - NoSecondContainerDefLink
+                - !Ref AWS::NoValue
+                - !Select [1, !Ref pContainerDefLinks]
+            PortMappings:
+              - ContainerPort:
+                  !If
+                    - NoSecondContainerPort
+                    - !Ref AWS::NoValue
+                    - !Select [1, !Ref pContainerDefContainerPorts]
+                HostPort:
+                  !If
+                    - NoSecondContainerHostPort
+                    - !Ref AWS::NoValue
+                    - !Select [1, !Ref pContainerDefHostPorts]
+                Protocol:
+                  !If
+                    - NoSecondContainerProtocol
+                    - !Ref AWS::NoValue
+                    - !Select [1, !Ref pContainerDefProtocol]
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Join
+                              - '-'
+                              - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                                - !Select [1, !Ref pContainerDefNames]
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: !Sub awslogs-${AWS::StackName}
+          - !Ref AWS::NoValue
+        - !If
+          - ThreeContainerDefs
+          - Name: !Select [2, !Ref pContainerDefNames]
+            Essential: true
+            Image: !Join
+                  - ''
+                  - - !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/testapp-'
+                    - !Join
+                      - ':'
+                      - - !Select [2, !Ref pContainerDefNames]
+                        - !Select [2, !Ref pContainerDefVersions]
+            Memory: !Select [2, !Ref pContainerDefMemory]
+            Links:
+              !If
+                - NoThirdContainerDefLink
+                - !Ref AWS::NoValue
+                - !Select [2, !Ref pContainerDefLinks]
+            PortMappings:
+              - ContainerPort:
+                  !If
+                    - NoThirdContainerPort
+                    - !Ref AWS::NoValue
+                    - !Select [2, !Ref pContainerDefContainerPorts]
+                HostPort:
+                  !If
+                    - NoThirdContainerHostPort
+                    - !Ref AWS::NoValue
+                    - !Select [2, !Ref pContainerDefHostPorts]
+                Protocol:
+                  !If
+                    - NoThirdContainerProtocol
+                    - !Ref AWS::NoValue
+                    - !Select [2, !Ref pContainerDefProtocol]
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Join
+                              - '-'
+                              - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                                - !Select [2, !Ref pContainerDefNames]
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: !Sub awslogs-${AWS::StackName}
+          - !Ref AWS::NoValue
+        - !If
+          - FourContainerDefs
+          - Name: !Select [3, !Ref pContainerDefNames]
+            Essential: true
+            Image: !Join
+                  - ''
+                  - - !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/testapp-'
+                    - !Join
+                      - ':'
+                      - - !Select [3, !Ref pContainerDefNames]
+                        - !Select [3, !Ref pContainerDefVersions]
+            Memory: !Select [3, !Ref pContainerDefMemory]
+            Links:
+              !If
+                - NoFourthContainerDefLink
+                - !Ref AWS::NoValue
+                - !Select [3, !Ref pContainerDefLinks]
+            PortMappings:
+              - ContainerPort:
+                  !If
+                    - NoFourthContainerPort
+                    - !Ref AWS::NoValue
+                    - !Select [3, !Ref pContainerDefContainerPorts]
+                HostPort:
+                  !If
+                    - NoFourthContainerHostPort
+                    - !Ref AWS::NoValue
+                    - !Select [3, !Ref pContainerDefHostPorts]
+                Protocol:
+                  !If
+                    - NoFourthContainerProtocol
+                    - !Ref AWS::NoValue
+                    - !Select [3, !Ref pContainerDefProtocol]
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Join
+                              - '-'
+                              - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                                - !Select [3, !Ref pContainerDefNames]
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: !Sub awslogs-${AWS::StackName}
+          - !Ref AWS::NoValue
+        - !If
+          - FiveContainerDefs
+          - Name: !Select [4, !Ref pContainerDefNames]
+            Essential: true
+            Image: !Join
+                  - ''
+                  - - !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/testapp-'
+                    - !Join
+                      - ':'
+                      - - !Select [4, !Ref pContainerDefNames]
+                        - !Select [4, !Ref pContainerDefVersions]
+            Memory: !Select [4, !Ref pContainerDefMemory]
+            Links:
+              !If
+                - NoFifthContainerDefLink
+                - !Ref AWS::NoValue
+                - !Select [4, !Ref pContainerDefLinks]
+            PortMappings:
+              - ContainerPort:
+                  !If
+                    - NoFifthContainerPort
+                    - !Ref AWS::NoValue
+                    - !Select [4, !Ref pContainerDefContainerPorts]
+                HostPort:
+                  !If
+                    - NoFifthContainerHostPort
+                    - !Ref AWS::NoValue
+                    - !Select [4, !Ref pContainerDefHostPorts]
+                Protocol:
+                  !If
+                    - NoFifthContainerProtocol
+                    - !Ref AWS::NoValue
+                    - !Select [4, !Ref pContainerDefProtocol]
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Join
+                              - '-'
+                              - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                                - !Select [4, !Ref pContainerDefNames]
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: !Sub awslogs-${AWS::StackName}
+          - !Ref AWS::NoValue
+
+  CloudWatchLogsGroupOne:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join
+                    - '-'
+                    - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                      - !Select [0, !Ref pContainerDefNames]
+      RetentionInDays: 365
+
+  CloudWatchLogsGroupTwo:
+    Type: AWS::Logs::LogGroup
+    Condition: TwoContainerDefs
+    Properties:
+      LogGroupName: !Join
+                    - '-'
+                    - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                      - !Select [1, !Ref pContainerDefNames]
+      RetentionInDays: 365
+
+  CloudWatchLogsGroupThree:
+    Type: AWS::Logs::LogGroup
+    Condition: ThreeContainerDefs
+    Properties:
+      LogGroupName: !Join
+                    - '-'
+                    - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                      - !Select [2, !Ref pContainerDefNames]
+      RetentionInDays: 365
+
+  CloudWatchLogsGroupFour:
+    Type: AWS::Logs::LogGroup
+    Condition: FourContainerDefs
+    Properties:
+      LogGroupName: !Join
+                    - '-'
+                    - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                      - !Select [3, !Ref pContainerDefNames]
+      RetentionInDays: 365
+
+  CloudWatchLogsGroupFive:
+    Type: AWS::Logs::LogGroup
+    Condition: FiveContainerDefs
+    Properties:
+      LogGroupName: !Join
+                    - '-'
+                    - - !Sub '${pApplicationName}-${pCustomer}-${pEnvironment}-${pServiceName}'
+                      - !Select [4, !Ref pContainerDefNames]
+      RetentionInDays: 365
+
+Outputs:
+  ECSService:
+    Description: A reference to the ECS service
+    Value: !Ref rECSService
+
+  ECSTaskDefinition:
+    Description: A reference to the ECS task definition
+    Value: !Ref rECSTaskDefinition
